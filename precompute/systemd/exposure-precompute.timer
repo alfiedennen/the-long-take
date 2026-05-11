@@ -1,0 +1,12 @@
+[Unit]
+Description=The Long Take pre-compute — every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=15s
+Persistent=true
+Unit=exposure-precompute.service
+
+[Install]
+WantedBy=timers.target

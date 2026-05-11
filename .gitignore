@@ -1,0 +1,20 @@
+# Local config — gitignored to prevent leaking entity names
+precompute/rooms.py
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Local dev
+*.log
+.env

@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>The Long Take</title>
+  <style>
+    /*
+     * The Long Take — radar event playback as a translucent space-time tube.
+     *
+     * Drop this folder into your Home Assistant /config/www/the-long-take/
+     * and visit https://<your-ha>/local/the-long-take/?r=<room>.
+     *
+     * Companion data is written by precompute/exposure_precompute.py to the
+     * sibling ./data/<room>.json — one file per room, refreshed every 5 min.
+     *
+     * X axis = radar X (left-right in room, mm)
+     * Y axis = TIME (seconds since window start) — vertical, "stack of moments"
+     * Z axis = radar Y (forward-back in room, mm)
+     *
+     * No floor implied. The cube is the data, not the room. Orbit it.
+     */
+    html, body {
+      margin: 0; padding: 0; height: 100%; width: 100%;
+      background: #14110d;            /* warm off-black, NOT pure black */
+      color: #e8d8b8;
+      font-family: -apple-system, system-ui, sans-serif;
+      overflow: hidden;
+    }
+    #root { position: fixed; inset: 0; }
+    canvas { display: block; touch-action: none; }
+
+    /* Diagnostic strip — top-left corner. Pushed to top:80px so it sits
+       below an HA app-header bar (~56px) when this page is iframed inside
+       a Home Assistant dashboard. Adjust freely if standalone. */
+    #status {
+      position: fixed; top: 80px; left: 14px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 11px; line-height: 1.6;
+      color: rgba(232, 216, 184, 0.85);
+      letter-spacing: 0.03em;
+      pointer-events: none;
+      max-width: 50vw;
+      padding: 8px 14px;
+      background: rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      border-radius: 10px;
+      z-index: 10;
+    }
+    #status .label { color: rgba(232, 216, 184, 0.5); }
+
+    /* Scrubber — bottom centre. Always visible, on a soft scrim so it
+       reads against any background. Dragging brings to full opacity. */
+    #scrub {
+      position: fixed; left: 50%; bottom: 24px;
+      transform: translateX(-50%);
+      width: min(72vw, 760px);
+      padding: 14px 22px 12px;
+      background: rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-radius: 16px;
+      border: 1px solid rgba(232, 216, 184, 0.12);
+      opacity: 0.85; transition: opacity 0.3s;
+      pointer-events: auto;
+      z-index: 10;
+    }
+    #root:hover #scrub, #scrub:hover, #scrub.touched { opacity: 1; }
+    #scrub input[type=range] {
+      width: 100%; -webkit-appearance: none; appearance: none;
+      background: transparent; cursor: ew-resize; height: 28px;
+    }
+    #scrub input[type=range]::-webkit-slider-runnable-track {
+      height: 4px;
+      background: linear-gradient(to right,
+        rgba(232, 216, 184, 0.18),
+        rgba(232, 216, 184, 0.45) 50%,
+        rgba(232, 216, 184, 0.18));
+      border-radius: 2px;
+    }
+    #scrub input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #f0dfba; margin-top: -7px;
+      box-shadow: 0 0 12px rgba(240, 223, 186, 0.6);
+      cursor: ew-resize;
+    }
+    #scrub input[type=range]::-moz-range-track {
+      height: 4px; background: rgba(232, 216, 184, 0.35); border-radius: 2px;
+    }
+    #scrub input[type=range]::-moz-range-thumb {
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #f0dfba; border: none;
+      box-shadow: 0 0 12px rgba(240, 223, 186, 0.6);
+      cursor: ew-resize;
+    }
+    #scrub-label {
+      text-align: center; font-size: 12px; margin-top: 8px;
+      font-family: ui-monospace, monospace;
+      color: rgba(232, 216, 184, 0.7);
+      letter-spacing: 0.05em;
+      user-select: none;
+    }
+
+    /* Audio toggle pill — top-right corner. Same iframe-aware top:80px. */
+    #audio-toggle {
+      position: fixed; top: 80px; right: 14px;
+      font-family: ui-monospace, monospace;
+      font-size: 11px; letter-spacing: 0.08em;
+      color: rgba(232, 216, 184, 0.85);
+      background: rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      border: 1px solid rgba(232, 216, 184, 0.18);
+      border-radius: 14px;
+      padding: 7px 13px;
+      cursor: pointer;
+      user-select: none;
+      transition: color 0.2s, border-color 0.2s, background 0.2s;
+      pointer-events: auto;
+      z-index: 10;
+    }
+    #audio-toggle:hover {
+      color: rgba(255, 255, 255, 0.95);
+      border-color: rgba(232, 216, 184, 0.45);
+      background: rgba(20, 30, 40, 0.7);
+    }
+    #audio-toggle .dot {
+      display: inline-block;
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #88cce0;
+      margin-right: 7px;
+      vertical-align: middle;
+      box-shadow: 0 0 8px rgba(136, 204, 224, 0.7);
+    }
+    #audio-toggle.muted .dot { background: #555; box-shadow: none; }
+    #audio-toggle.waiting .dot {
+      background: #d4a060;
+      animation: audioPulse 1.5s ease-in-out infinite;
+    }
+    @keyframes audioPulse {
+      0%, 100% { opacity: 0.5; box-shadow: 0 0 4px rgba(212, 160, 96, 0.4); }
+      50%      { opacity: 1.0; box-shadow: 0 0 14px rgba(212, 160, 96, 0.9); }
+    }
+
+    /* Mode toggle — top-right corner.
+       Pressing flips between Reveal (default; playback unveils worms) and
+       See-all (every worm visible at all times, cursor still moves). */
+    #mode-toggle {
+      position: fixed; top: 16px; right: 18px;
+      font-family: ui-monospace, monospace;
+      font-size: 11px; letter-spacing: 0.08em;
+      color: rgba(232, 216, 184, 0.55);
+      background: rgba(20, 17, 13, 0.55);
+      border: 1px solid rgba(232, 216, 184, 0.18);
+      border-radius: 14px;
+      padding: 6px 12px;
+      cursor: pointer;
+      user-select: none;
+      transition: color 0.2s, border-color 0.2s, background 0.2s;
+      pointer-events: auto;
+    }
+    #mode-toggle:hover {
+      color: rgba(240, 223, 186, 0.95);
+      border-color: rgba(240, 223, 186, 0.45);
+      background: rgba(40, 32, 22, 0.7);
+    }
+    #mode-toggle .dot {
+      display: inline-block;
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #f0dfba;
+      margin-right: 6px;
+      vertical-align: middle;
+      box-shadow: 0 0 8px rgba(240, 223, 186, 0.6);
+    }
+    #mode-toggle.see-all .dot { background: #d4a060; box-shadow: 0 0 8px rgba(212, 160, 96, 0.7); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <div id="status">
+    <span class="label">room:</span> <span id="s-room">…</span>
+    &nbsp;<span class="label">events:</span> <span id="s-n">…</span>
+    &nbsp;<span class="label">window:</span> <span id="s-window">…</span>
+    <br>
+    <span class="label">drag</span> orbit
+    &nbsp;<span class="label">scroll</span> zoom
+    &nbsp;<span class="label">space / dbl-click</span> play/pause
+  </div>
+
+  <div id="audio-toggle" title="Toggle audio">
+    <span class="dot"></span>TAP TO ENABLE SOUND
+  </div>
+
+  <div id="scrub">
+    <input type="range" id="scrub-range" min="0" max="1000" value="1000">
+    <div id="scrub-label">now</div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module" src="./ghost-cloud.js?v=22"></script>
+</body>
+</html>

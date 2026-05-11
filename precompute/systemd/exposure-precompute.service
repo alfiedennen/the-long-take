@@ -1,0 +1,15 @@
+[Unit]
+Description=The Long Take pre-compute — radar JSON refresh
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# EnvironmentFile should hold EXPOSURE_DB_PASSWORD, EXPOSURE_HA_HOST,
+# and optionally EXPOSURE_HA_OUT_DIR. See docs/install.md.
+EnvironmentFile=/etc/the-long-take/env
+ExecStart=/opt/the-long-take/venv/bin/python /opt/the-long-take/exposure_precompute.py 24
+WorkingDirectory=/opt/the-long-take
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=120
