@@ -1,5 +1,7 @@
 # the-long-take
 
+![The Long Take — a translucent honey-amber water-membrane time-tube rendering twenty-four hours of one room from radar data](docs/img/long-take-render.jpg)
+
 > Twenty-four hours of one room, rendered as a single continuous translucent water-membrane you can listen to. Built for [haroldathome.com/the-long-take](https://haroldathome.com/the-long-take); released for anyone with a Home Assistant install and an mmWave radar.
 
 A long take is a film term — Hitchcock made *Rope* (1948) as one apparent continuous shot. This is a long take of one room, fixed camera, twenty-four hours, no cuts. The room plays.
